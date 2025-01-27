@@ -1,0 +1,67 @@
+===========================================================================================================================
+#shell varibales
+
+AMI_ID=$(aws ec2 describe-images \
+	--filters "Name=name,Values=ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-*" \
+	--query "Images[0].ImageId" --output text)
+VPC_ID=$(aws ec2 describe-vpcs \
+	--filters "Name=tag:Name,Values=vpc-ansible" \
+	--query "Vpcs[0].VpcId" --output text)
+SECURITY_GROUP_ID=$(aws ec2 describe-security-groups \
+    --filters "Name=group-name,Values=sg_ansible" "Name=vpc-id,Values=$VPC_ID" \
+    --query "SecurityGroups[0].GroupId" \
+    --output text)
+PUBLIC_IP=$(curl -s https://checkip.amazonaws.com)
+KEY=$(aws ec2 describe-key-pairs \
+    --filters "Name=key-name,Values=ansible-key" \
+    --query "KeyPairs[0].KeyName" \
+    --output text)
+AVAILABILITY_ZONE=ap-southeast-1a
+CIDR_SUB=10.0.1.0/24
+SUBNET_ID=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" --query "Subnets[*].SubnetId" --output text)
+
+==============================================================================================================================
+
+
+
+aws command
+------------------
+aws ec2 create-key-pair --key-name ansible-key --query "KeyMaterial" --output text > ansible-key.pem
+chmod 400 ansible-key.pem
+----------------------------------------------------------------------------------------
+aws ec2 create-vpc \
+	--cidr-block 10.0.0.0/16 \
+	--tag-specifications 'ResourceType=vpc,Tags=[{Key=Name,Value=vpc-ansible}]'
+aws ec2 create-security-group \
+	--group-name sg_ansible \
+	--description "Security group for Ansible-related resources" \
+	--vpc-id $VPC_ID
+aws ec2 authorize-security-group-ingress \
+	--group-id $SECURITY_GROUP_ID \
+	--protocol tcp \
+	--port 22 \
+	--cidr $PUBLIC_IP/32
+aws ec2 create-subnet \
+  --vpc-id $VPC_ID \
+  --cidr-block $CIDR_SUB \
+  --availability-zone $AVAILABILITY_ZONE \
+  --query "Subnet.SubnetId" \
+  --output text
+
+for i in {1..3}; do
+    aws ec2 run-instances \
+	--image-id $AMI_ID \
+	--count 1 \
+	--instance-type t2.micro \
+	--key-name $KEY \
+	--security-group-ids $SECURITY_GROUP_ID \
+	--subnet-id $SUBNET_ID \
+	--tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=ansible-$i}]" \
+	--query "Instances[0].InstanceId" --output text
+done
+
+
+CHECK 
+------------------
+aws ec2 describe-security-groups --group-ids $SECURITY_GROUP_ID
+aws ec2 describe-vpcs --vpc-ids $VPC_ID
